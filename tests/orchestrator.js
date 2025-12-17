@@ -6,8 +6,11 @@ import migrator from "models/migrator.js";
 import user from "models/user.js";
 import session from "models/sessions.js";
 
+const emailHttpUrl = `http://${process.env.EMAIL_HTTP_HOST}:${process.env.EMAIL_HTTP_PORT}`;
+
 async function waitForAllServices() {
   await waitForWebServer();
+  await waitForEmailServer();
 
   async function waitForWebServer() {
     // ensure the server is ready through GET status endpoint.
@@ -22,6 +25,26 @@ async function waitForAllServices() {
 
     async function fetchStatusPage() {
       const response = await fetch("http://localhost:3000/api/v1/status");
+
+      if (response.status !== 200) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+    }
+  }
+
+  async function waitForEmailServer() {
+    // ensure the server is ready through GET status endpoint.
+    return retry(fetchEmailPage, {
+      retries: 100,
+      maxTimeout: 1000,
+      onRetry: (error, attempt) =>
+        console.log(
+          `Attempt ${attempt} - Failed to fetch email page: ${error.message}`,
+        ),
+    });
+
+    async function fetchEmailPage() {
+      const response = await fetch(emailHttpUrl);
 
       if (response.status !== 200) {
         throw new Error(`HTTP error ${response.status}`);
@@ -51,12 +74,34 @@ async function createSession(userId) {
   return await session.create(userId);
 }
 
+async function deleteAllEmails() {
+  await fetch(`${emailHttpUrl}/messages`, {
+    method: "DELETE",
+  });
+}
+
+async function getLastEmail() {
+  const emailListResponse = await fetch(`${emailHttpUrl}/messages`);
+  const emailListBody = await emailListResponse.json();
+  const lastEmailItem = emailListBody.pop();
+
+  const emailTextResponse = await fetch(
+    `${emailHttpUrl}/messages/${lastEmailItem.id}.plain`,
+  );
+  const emailTextBody = await emailTextResponse.text();
+
+  lastEmailItem.text = emailTextBody;
+  return lastEmailItem;
+}
+
 const orchestrator = {
   waitForAllServices,
   clearDatabase,
   runPendingMigrations,
   createUser,
   createSession,
+  deleteAllEmails,
+  getLastEmail,
 };
 
 export default orchestrator;
